@@ -390,19 +390,21 @@
 
   function speakFallback(ex) {
     if (!('speechSynthesis' in window)) return;
+    const synth = window.speechSynthesis;
     if (!chosenVoice) pickVoice();
-    window.speechSynthesis.cancel();
+    if (synth.speaking || synth.pending) synth.cancel();
+    synth.resume(); // clears a stuck "paused" state some browsers get into
     const u = new SpeechSynthesisUtterance(ex.say || ex.label);
     if (chosenVoice) { u.voice = chosenVoice; u.lang = chosenVoice.lang; }
     else { u.lang = PREFERRED_LANG; }
     u.rate = 0.9;
     u.pitch = 1;
-    window.speechSynthesis.speak(u);
+    u.volume = 1;
+    synth.speak(u);
   }
 
   function speak(ex) {
     if (currentVoice) { currentVoice.pause(); currentVoice.currentTime = 0; }
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
     const a = voices[ex.id];
     if (!USE_RECORDINGS || ex.audioFailed || !a) { speakFallback(ex); return; }
@@ -450,36 +452,40 @@
 
     let resetTimer = null;
     let lastPress = 0;
+    let lastSpeak = 0;
 
-    function activate() {
+    // Instant feedback: highlight + ping the moment a finger touches
+    function feedback() {
       const now = Date.now();
       if (now - lastPress < REPRESS_GUARD_MS) return;
       lastPress = now;
 
-      // 1) Instant visual
       clearTimeout(resetTimer);
       btn.classList.remove('pressed');
       void btn.offsetWidth; // restart state cleanly on rapid re-press
       btn.classList.add('pressed');
 
-      // 2) Ping + voice
       ping();
-      speak(ex);
       announcer.textContent = ex.label;
 
-      // 3) Fade back to default
       resetTimer = setTimeout(() => btn.classList.remove('pressed'), RESET_DELAY_MS);
     }
 
-    // Fastest response on touch
+    // Voice: iPhone/iPad only allow speech when the finger lifts (the click)
+    function say() {
+      const now = Date.now();
+      if (now - lastSpeak < REPRESS_GUARD_MS) return;
+      lastSpeak = now;
+      speak(ex);
+    }
+
     btn.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      e.preventDefault();
-      activate();
+      feedback();
     });
-    // Keyboard, Switch Control and VoiceOver activation (click with no pointer)
-    btn.addEventListener('click', e => {
-      if (e.detail === 0) activate();
+    btn.addEventListener('click', () => {
+      feedback(); // covers keyboard / Switch Control, ignored if a touch just ran it
+      say();
     });
     btn.addEventListener('contextmenu', e => e.preventDefault());
   });
